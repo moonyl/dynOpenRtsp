@@ -22,7 +22,6 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 extern Medium* createClient(UsageEnvironment& env, char const* URL, int verbosityLevel, char const* applicationName);
 extern void assignClient(Medium* client);
 extern RTSPClient* ourRTSPClient;
-extern SIPClient* ourSIPClient;
 
 extern void getOptions(RTSPClient::responseHandler* afterFunc);
 
@@ -40,10 +39,7 @@ extern void tearDownSession(MediaSession* session, RTSPClient::responseHandler* 
 extern void setUserAgentString(char const* userAgentString);
 
 extern Authenticator* ourAuthenticator;
-extern Boolean allowProxyServers;
-extern Boolean supportCodecSelection;
 extern char const* clientProtocolName;
-extern unsigned statusCode;
 
 
 extern int shutdownExitCode;

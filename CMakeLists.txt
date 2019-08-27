@@ -3,15 +3,15 @@ project(dynRtspOpenRtsp)
 
 set(CMAKE_CXX_STANDARD 14)
 
-add_executable(dynRtspProxyServer
+add_executable(dynRtspOpenRtsp
         openRTSP.cpp
         playCommon.cpp
         playCommon.hh
         arguments.cpp
-        usage.cpp
         separteExterns.h
         shutdown.cpp
-        )
+        json.hpp
+        arguments.h)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTOMOC ON)
@@ -63,9 +63,9 @@ set_target_properties(groupsock PROPERTIES
 
 if (MSVC)
     message(STATIC "MSVC")
-    target_compile_definitions(dynRtspProxyServer
+    target_compile_definitions(dynRtspOpenRtsp
             PRIVATE _LARGEFILE_SOURCE=1 _FILE_OFFSET_BITS=64 BSD=1 _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00)
-    target_link_libraries(dynRtspProxyServer
+    target_link_libraries(dynRtspOpenRtsp
             PRIVATE
                 liveMedia
                 basicUsageEnvironment
@@ -75,13 +75,13 @@ if (MSVC)
                 winmm
             )
 else()
-    target_compile_definitions(dynRtspProxyServer
+    target_compile_definitions(dynRtspOpenRtsp
             PRIVATE SOCKLEN_T=socklen_t _LARGEFILE_SOURCE=1 _FILE_OFFSET_BITS=64 BSD=1)
-    target_link_libraries(dynRtspProxyServer PRIVATE
+    target_link_libraries(dynRtspOpenRtsp PRIVATE
             liveMedia
             basicUsageEnvironment
             usageEnvironment
             groupsock
             pthread)
 endif()
-target_compile_options(dynRtspProxyServer PRIVATE -Wall)
+target_compile_options(dynRtspOpenRtsp PRIVATE -Wall)

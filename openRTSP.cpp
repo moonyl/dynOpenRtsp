@@ -23,7 +23,7 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 
 #include "playCommon.hh"
 
-RTSPClient* ourRTSPClient = NULL;
+RTSPClient* ourRTSPClient = nullptr;
 Medium* createClient(UsageEnvironment& env, char const* url, int verbosityLevel, char const* applicationName) {
   extern portNumBits tunnelOverHTTPPortNum;
   return ourRTSPClient = RTSPClient::createNew(env, url, verbosityLevel, applicationName, tunnelOverHTTPPortNum);
@@ -62,7 +62,7 @@ void setUserAgentString(char const* userAgentString) {
   ourRTSPClient->setUserAgentString(userAgentString);
 }
 
-Boolean allowProxyServers = False;
-Boolean controlConnectionUsesTCP = True;
+
+
 Boolean supportCodecSelection = False;
 char const* clientProtocolName = "RTSP";
