@@ -22,15 +22,18 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 // Instead, we recommend using the "testRTSPClient" application code as a model.
 
 #include "playCommon.hh"
+#include "ConfigHoldRTSPClient.h"
 
-RTSPClient* ourRTSPClient = nullptr;
-Medium* createClient(UsageEnvironment& env, char const* url, int verbosityLevel, char const* applicationName) {
+using nlohmann::json;
+
+ConfigHoldRTSPClient* ourRTSPClient = nullptr;
+Medium* createClient(UsageEnvironment& env, char const* url, const json& configData, int verbosityLevel, char const* applicationName) {
   extern portNumBits tunnelOverHTTPPortNum;
-  return ourRTSPClient = RTSPClient::createNew(env, url, verbosityLevel, applicationName, tunnelOverHTTPPortNum);
+  return ourRTSPClient = ConfigHoldRTSPClient::createNew(env, url, configData, verbosityLevel, applicationName, tunnelOverHTTPPortNum);
 }
 
 void assignClient(Medium* client) {
-  ourRTSPClient = (RTSPClient*)client;
+  ourRTSPClient = (ConfigHoldRTSPClient*)client;
 }
 
 void getOptions(RTSPClient::responseHandler* afterFunc) { 

@@ -24,9 +24,11 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 #include "playCommon.hh"
 #include "BasicUsageEnvironment.hh"
 #include "GroupsockHelper.hh"
-#include <string>
 #include "arguments.h"
-
+#include <functional>
+#include "json.hpp"
+#include "ConfigHoldRTSPClient.h"
+#include "LocalSocketSink.h"
 #if defined(__WIN32__) || defined(_WIN32)
 #define snprintf _snprintf
 #else
@@ -34,9 +36,11 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 #define USE_SIGNALS 1
 #endif
 
+
+using nlohmann::json;
+
 // Forward function definitions:
-void continueAfterClientCreation0(RTSPClient* client, Boolean requestStreamingOverTCP);
-void continueAfterClientCreation1();
+void continueAfterClientCreation1(const json& configData);
 void continueAfterOPTIONS(RTSPClient* client, int resultCode, char* resultString);
 void continueAfterDESCRIBE(RTSPClient* client, int resultCode, char* resultString);
 void continueAfterSETUP(RTSPClient* client, int resultCode, char* resultString);
@@ -45,7 +49,7 @@ void continueAfterTEARDOWN(RTSPClient* client, int resultCode, char* resultStrin
 
 void createOutputFiles(char const* periodicFilenameSuffix);
 void createPeriodicOutputFiles();
-void setupStreams();
+void setupStreams(ConfigHoldRTSPClient* client);
 void closeMediaSinks();
 void subsessionAfterPlaying(void* clientData);
 void subsessionByeHandler(void* clientData, char const* reason);
@@ -59,7 +63,6 @@ void checkInterPacketGaps(void* clientData);
 void checkSessionTimeoutBrokenServer(void* clientData);
 void beginQOSMeasurement();
 
-char const* progName;
 UsageEnvironment* env;
 Medium* ourClient = nullptr;
 Authenticator *ourAuthenticator = nullptr;
@@ -74,10 +77,8 @@ TaskToken periodicFileOutputTask = nullptr;
 QuickTimeFileSink* qtOut = nullptr;
 AVIFileSink* aviOut = nullptr;
 char const* singleMedium = nullptr;
-int verbosityLevel = 1; // by default, print verbose output
-double duration = 0;
-double durationSlop = -1.0; // extra seconds to play at the end
-double initialSeekTime = 0.0f;
+
+double initialSeekTime = 0.0f;  // TODO : client 별로
 float scale = 1.0f;
 double endTime;
 unsigned interPacketGapMaxTime = 0;
@@ -99,7 +100,6 @@ unsigned socketInputBufferSize = 0;
 Boolean syncStreams = False;
 Boolean waitForResponseToTEARDOWN = True;
 unsigned qosMeasurementIntervalMS = 0; // 0 means: Don't output QOS data
-char* userAgent = nullptr;
 unsigned fileOutputSecondsSoFar = 0; // seconds
 HandlerServerForREGISTERCommand* handlerServerForREGISTERCommand;
 char* usernameForREGISTER = nullptr;
@@ -107,6 +107,52 @@ char* passwordForREGISTER = nullptr;
 UserAuthenticationDatabase* authDBForREGISTER = nullptr;
 
 struct timeval startTime;
+
+
+
+class RtspClient
+{
+    UsageEnvironment &_env;
+    std::string _streamURL;
+    const json _configData;
+    int _verbosityLevel;
+    std::string _programName;
+    std::function<void(UsageEnvironment &env)> _errorHandler = nullptr;
+
+
+public:
+    RtspClient(UsageEnvironment &env, const std::string& streamUrl, const json& configData, std::function<void(UsageEnvironment &env)> errorHandler = nullptr, int verbosityLevel = 0, const std::string& programName = "") :
+            _env(env), _streamURL(streamUrl), _configData(configData), _verbosityLevel(verbosityLevel), _errorHandler(errorHandler), _programName(programName)
+    {
+    }
+
+    void setVerbosityLevel(int level)   {
+        _verbosityLevel = level;
+    }
+
+    void setProgramName(const std::string& programName) {
+        _programName = programName;
+    }
+
+    Medium* create() {
+        Medium *result = createClient(_env, _streamURL.c_str(), _configData, _verbosityLevel, _programName.c_str());
+        if (result == nullptr && _errorHandler) {
+            _errorHandler(_env);
+        }
+        return result;
+    }
+};
+
+// duration은 음수로도 설정할 수 있다. durationSlop으로 사용하는데, 아직 의미는 모르겠다.
+// interPacketGapMaxTime 은 packet이 오기까지 기다리는 값이라고 되어 있다.
+// qosMeasurementIntervalMS 은 100 의 배수이다.
+json configData = {
+        {"audioOnly", false}, {"videoOnly", false}, {"verbosityLevel", 1}, {"duration", 0}, {"interPacketGapMaxTime", 0},
+        {"playContinuously", false}, {"oneFilePerFrame", false}, {"streamUsingTCP", false}, {"tunnelOverHTTPPortNum", 0},
+        {"username", ""}, {"password", ""}, {"usernameForREGISTER", ""}, {"passwordForREGISTER", ""}, {"sendKeepAlives", false},
+        {"fileNamePrefix", ""}, {"fileSinkBufferSize", 100000}, {"socketInputBufferSize", 0}, {"syncStreams", false},
+        {"qosMeasurementIntervalMS", 0}, {"initialSeekTime", 0.0}, {"scale", 1.0}, {"streamURL", "rtsp://192.168.15.11/Apink_I'mSoSick_720_2000kbps.mp4"}
+};
 
 int main(int argc, char** argv) {
   // Begin by setting up our usage environment:
@@ -120,17 +166,16 @@ int main(int argc, char** argv) {
   signal(SIGHUP, signalHandlerShutdown);
   signal(SIGUSR1, signalHandlerShutdown);
 #endif
-    progName = argv[0];
+    handleConfigs(configData);
 
-    handleConfigs();
-
-  // Create (or arrange to create) our client object:
-    ourClient = createClient(*env, streamURL.c_str(), verbosityLevel, progName);
-    if (ourClient == nullptr) {
-      *env << "Failed to create " << clientProtocolName << " client: " << env->getResultMsg() << "\n";
-      shutdown();
-    }
-    continueAfterClientCreation1();
+    RtspClient clientCreator(*env, streamURL, configData, [](UsageEnvironment& env) {
+        env << "Failed to create " << clientProtocolName << " client: " << env.getResultMsg() << "\n";
+        shutdown();
+    });
+    clientCreator.setProgramName(argv[0]);
+    clientCreator.setVerbosityLevel(configData["verbosityLevel"]);
+    ourClient = clientCreator.create();
+    continueAfterClientCreation1(configData);
 
 
   // All subsequent activity takes place within the event loop:
@@ -139,22 +184,8 @@ int main(int argc, char** argv) {
   return 0; // only to prevent compiler warning
 }
 
-void continueAfterClientCreation0(RTSPClient* newRTSPClient, Boolean requestStreamingOverTCP) {
-  if (newRTSPClient == nullptr) return;
-
-  streamUsingTCP = requestStreamingOverTCP;
-
-  assignClient(ourClient = newRTSPClient);
-  streamURL = newRTSPClient->url();
-
-  // Having handled one "REGISTER" command (giving us a "rtsp://" URL to stream from), we don't handle any more:
-  Medium::close(handlerServerForREGISTERCommand); handlerServerForREGISTERCommand = nullptr;
-
-  continueAfterClientCreation1();
-}
-
-void continueAfterClientCreation1() {
-  setUserAgentString(userAgent);
+void continueAfterClientCreation1(const json &configData) {
+  setUserAgentString(nullptr);
 
   if (sendOptionsRequest) {
     // Begin by sending an "OPTIONS" command:
@@ -164,14 +195,14 @@ void continueAfterClientCreation1() {
   }
 }
 
-void continueAfterOPTIONS(RTSPClient*, int resultCode, char* resultString) {
+void continueAfterOPTIONS(RTSPClient*, int /*resultCode*/, char* resultString) {
   delete[] resultString;
 
   // Next, get a SDP description for the stream:
   getSDPDescription(continueAfterDESCRIBE);
 }
 
-void continueAfterDESCRIBE(RTSPClient*, int resultCode, char* resultString) {
+void continueAfterDESCRIBE(RTSPClient* client, int resultCode, char* resultString) {
   if (resultCode != 0) {
     *env << "Failed to get a SDP description for the URL \"" << streamURL.c_str() << "\": " << resultString << "\n";
     delete[] resultString;
@@ -267,7 +298,7 @@ void continueAfterDESCRIBE(RTSPClient*, int resultCode, char* resultString) {
   if (!madeProgress) shutdown();
 
   // Perform additional 'setup' on each subsession, before playing them:
-  setupStreams();
+  setupStreams(dynamic_cast<ConfigHoldRTSPClient*>(client));
 }
 
 MediaSubsession *subsession;
@@ -295,7 +326,7 @@ void continueAfterSETUP(RTSPClient* client, int resultCode, char* resultString) 
   if (client != nullptr) sessionTimeoutParameter = client->sessionTimeoutParameter();
 
   // Set up the next subsession, if any:
-  setupStreams();
+  setupStreams(dynamic_cast<ConfigHoldRTSPClient*>(client));
 }
 
 void createOutputFiles(char const* periodicFilenameSuffix) {
@@ -352,16 +383,21 @@ void createOutputFiles(char const* periodicFilenameSuffix) {
 	  createOggFileSink = True;
 	}
       }
+        LocalSocketSink*  localSocketSink = nullptr;
       if (createOggFileSink) {
 	fileSink = OggFileSink
 	  ::createNew(*env, outFileName,
 		      subsession->rtpTimestampFrequency(), subsession->fmtp_config());
       } else if (fileSink == nullptr) {
 	// Normal case:
-	fileSink = FileSink::createNew(*env, outFileName,
-				       fileSinkBufferSize, oneFilePerFrame);
+	//fileSink = FileSink::createNew(*env, outFileName,
+	//			       fileSinkBufferSize, oneFilePerFrame);
+          localSocketSink = LocalSocketSink::createNew(*env, "audioStream", fileSinkBufferSize, oneFilePerFrame);
       }
-      subsession->sink = fileSink;
+        if(localSocketSink) {
+            subsession->sink = localSocketSink;
+        }
+        //subsession->sink = fileSink;
 
       if (subsession->sink == nullptr) {
 	*env << "Failed to create FileSink for \"" << outFileName
@@ -421,7 +457,7 @@ void createPeriodicOutputFiles() {
 					       (void*)nullptr);
 }
 
-void setupStreams() {
+void setupStreams(ConfigHoldRTSPClient* client) {
   static MediaSubsessionIterator* setupIter = nullptr;
   if (setupIter == nullptr) setupIter = new MediaSubsessionIterator(*session);
   while ((subsession = setupIter->next()) != nullptr) {
@@ -437,24 +473,21 @@ void setupStreams() {
   if (!madeProgress) shutdown();
 
   // Create output files:
-
    createOutputFiles("");
 
-
-
   // Finally, start playing each subsession, to start the data flow:
-  if (duration == 0) {
-    if (scale > 0) duration = session->playEndTime() - initialSeekTime; // use SDP end time
-    else if (scale < 0) duration = initialSeekTime;
+  if (client->duration() == 0) {
+    if (scale > 0) client->setDuration(session->playEndTime()); // use SDP end time
+    else if (scale < 0) client->setDuration(0.0f);
   }
-  if (duration < 0) duration = 0.0;
+  if (client->duration() < 0) client->setDuration(0.0);
 
-  endTime = initialSeekTime;
+  endTime = 0.0f;
   if (scale > 0) {
-    if (duration <= 0) endTime = -1.0f;
-    else endTime = initialSeekTime + duration;
+    if (client->duration() <= 0) endTime = -1.0f;
+    else endTime = client->duration();
   } else {
-    endTime = initialSeekTime - duration;
+    endTime = 0.0f - client->duration();
     if (endTime < 0) endTime = 0.0f;
   }
 
@@ -465,11 +498,11 @@ void setupStreams() {
     startPlayingSession(session, absStartTime, absEndTime, scale, continueAfterPLAY);
   } else {
     // Normal case: Seek by relative time (NPT):
-    startPlayingSession(session, initialSeekTime, endTime, scale, continueAfterPLAY);
+    startPlayingSession(session, 0.0f, endTime, scale, continueAfterPLAY);
   }
 }
 
-void continueAfterPLAY(RTSPClient*, int resultCode, char* resultString) {
+void continueAfterPLAY(RTSPClient* client, int resultCode, char* resultString) {
   if (resultCode != 0) {
     *env << "Failed to start playing session: " << resultString << "\n";
     delete[] resultString;
@@ -488,18 +521,20 @@ void continueAfterPLAY(RTSPClient*, int resultCode, char* resultString) {
   // Figure out how long to delay (if at all) before shutting down, or
   // repeating the playing
   Boolean timerIsBeingUsed = False;
-  double secondsToDelay = duration;
-  if (duration > 0) {
+
+  ConfigHoldRTSPClient* holdRtspClient = dynamic_cast<ConfigHoldRTSPClient*>(client);
+  double secondsToDelay = holdRtspClient->duration();
+  if (holdRtspClient->duration() > 0) {
     // First, adjust "duration" based on any change to the play range (that was specified in the "PLAY" response):
-    double rangeAdjustment = (session->playEndTime() - session->playStartTime()) - (endTime - initialSeekTime);
-    if (duration + rangeAdjustment > 0.0) duration += rangeAdjustment;
+    double rangeAdjustment = (session->playEndTime() - session->playStartTime()) - endTime;
+    if (holdRtspClient->duration() + rangeAdjustment > 0.0) holdRtspClient->setDuration(holdRtspClient->duration() + rangeAdjustment);
 
     timerIsBeingUsed = True;
     double absScale = scale > 0 ? scale : -scale; // ASSERT: scale != 0
-    secondsToDelay = duration/absScale + durationSlop;
+    secondsToDelay = holdRtspClient->duration()/absScale + holdRtspClient->durationSlop();
 
     int64_t uSecsToDelay = (int64_t)(secondsToDelay*1000000.0);
-    sessionTimerTask = env->taskScheduler().scheduleDelayedTask(uSecsToDelay, (TaskFunc*)sessionTimerHandler, (void*)nullptr);
+    sessionTimerTask = env->taskScheduler().scheduleDelayedTask(uSecsToDelay, (TaskFunc*)sessionTimerHandler, (void*)client);
   }
 
   char const* actionString
@@ -524,7 +559,7 @@ void continueAfterPLAY(RTSPClient*, int resultCode, char* resultString) {
 
   // Watch for incoming packets (if desired):
   checkForPacketArrival(nullptr);
-  checkInterPacketGaps(nullptr);
+  checkInterPacketGaps(client);
   checkSessionTimeoutBrokenServer(nullptr);
 }
 
@@ -555,7 +590,7 @@ void subsessionAfterPlaying(void* clientData) {
   }
 
   // All subsessions' streams have now been closed
-  sessionAfterPlaying();
+  sessionAfterPlaying(clientData);
 }
 
 void subsessionByeHandler(void* clientData, char const* reason) {
@@ -594,14 +629,15 @@ void sessionAfterPlaying(void* /*clientData*/) {
     }
     totNumPacketsReceived = ~0;
 
-    startPlayingSession(session, initialSeekTime, endTime, scale, continueAfterPLAY);
+    //ConfigHoldRTSPClient* client = static_cast<ConfigHoldRTSPClient*>(clientData);
+    startPlayingSession(session, 0.0f, endTime, scale, continueAfterPLAY);
   }
 }
 
-void sessionTimerHandler(void* /*clientData*/) {
+void sessionTimerHandler(void* clientData) {
   sessionTimerTask = nullptr;
 
-  sessionAfterPlaying();
+  sessionAfterPlaying(clientData);
 }
 
 void periodicFileOutputTimerHandler(void* /*clientData*/) {
@@ -741,7 +777,7 @@ void beginQOSMeasurement() {
   scheduleNextQOSMeasurement();
 }
 
-void printQOSData(int exitCode) {
+void printQOSData(int /*exitCode*/) {
   *env << "begin_QOS_statistics\n";
   
   // Print out stats for each active subsession:
@@ -902,7 +938,7 @@ void checkForPacketArrival(void* /*clientData*/) {
 			       (TaskFunc*)checkForPacketArrival, nullptr);
 }
 
-void checkInterPacketGaps(void* /*clientData*/) {
+void checkInterPacketGaps(void* clientData) {
   if (interPacketGapMaxTime == 0) return; // we're not checking
 
   // Check each subsession, counting up how many packets have been received:
@@ -921,13 +957,13 @@ void checkInterPacketGaps(void* /*clientData*/) {
     // checked, so end this stream:
     *env << "Closing session, because we stopped receiving packets.\n";
     interPacketGapCheckTimerTask = nullptr;
-    sessionAfterPlaying();
+    sessionAfterPlaying(clientData);
   } else {
     totNumPacketsReceived = newTotNumPacketsReceived;
     // Check again, after the specified delay:
     interPacketGapCheckTimerTask
       = env->taskScheduler().scheduleDelayedTask(interPacketGapMaxTime*1000000,
-				 (TaskFunc*)checkInterPacketGaps, nullptr);
+				 (TaskFunc*)checkInterPacketGaps, clientData);
   }
 }
 

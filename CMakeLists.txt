@@ -11,7 +11,7 @@ add_executable(dynRtspOpenRtsp
         separteExterns.h
         shutdown.cpp
         json.hpp
-        arguments.h)
+        arguments.h ConfigHoldRTSPClient.cpp ConfigHoldRTSPClient.h LocalSocketSink.cpp LocalSocketSink.h)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTOMOC ON)
@@ -73,6 +73,7 @@ if (MSVC)
                 groupsock
                 ws2_32
                 winmm
+                Qt5::Network
             )
 else()
     target_compile_definitions(dynRtspOpenRtsp
@@ -82,6 +83,8 @@ else()
             basicUsageEnvironment
             usageEnvironment
             groupsock
-            pthread)
+            pthread
+            Qt5::Network
+            )
 endif()
 target_compile_options(dynRtspOpenRtsp PRIVATE -Wall)

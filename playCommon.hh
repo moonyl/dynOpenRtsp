@@ -18,10 +18,12 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 // Interfaces
 
 #include "liveMedia.hh"
+#include "json.hpp"
 
-extern Medium* createClient(UsageEnvironment& env, char const* URL, int verbosityLevel, char const* applicationName);
+extern Medium* createClient(UsageEnvironment& env, char const* url, const nlohmann::json& configData, int verbosityLevel, char const* applicationName);
 extern void assignClient(Medium* client);
-extern RTSPClient* ourRTSPClient;
+class ConfigHoldRTSPClient;
+extern ConfigHoldRTSPClient* ourRTSPClient;
 
 extern void getOptions(RTSPClient::responseHandler* afterFunc);
 

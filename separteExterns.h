@@ -9,9 +9,6 @@
 extern UsageEnvironment* env;
 extern unsigned short desiredPortNum;
 extern char const* singleMedium;
-extern int verbosityLevel; // by default, print verbose output
-extern double duration;
-extern double durationSlop; // extra seconds to play at the end
 extern unsigned interPacketGapMaxTime;
 extern Boolean playContinuously;
 extern int simpleRTPoffsetArg;
@@ -34,14 +31,10 @@ extern unsigned socketInputBufferSize;
 
 extern Boolean syncStreams;
 
-extern char* userAgent;
 extern unsigned qosMeasurementIntervalMS; // 0 means: Don't output QOS data
-extern double initialSeekTime;
 extern float scale;
 
 extern Boolean forceMulticastOnUnspecified;
-
-extern char const* progName;
 
 extern TaskToken periodicFileOutputTask;
 extern TaskToken sessionTimerTask;

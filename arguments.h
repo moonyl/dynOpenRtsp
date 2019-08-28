@@ -3,5 +3,5 @@
 //
 
 #pragma once
-
-void handleConfigs(/*const json& configData*/);
+#include "json.hpp"
+void handleConfigs(const nlohmann::json& configData);
